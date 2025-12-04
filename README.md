@@ -40,7 +40,7 @@ Optional modules are:
 - [Python bindings](https://github.com/iganets/iganet-python) `python[main]`
 - [MATLAB bindings](https://github.com/iganets/iganet-matlab) `matlab[main]`
 
-Then you can run the image:
+Once the build process completed you can run the image:
 
 ```
 docker run -ti --rm --name iganet iganet
