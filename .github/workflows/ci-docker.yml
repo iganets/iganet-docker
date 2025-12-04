@@ -46,7 +46,7 @@ jobs:
         with:
           context: .
           build-args: |
-            IGANET_OPTIONAL="examples"
+            IGANET_OPTIONAL=examples
           file: ops/Dockerfile.cpu
           push: true
           tags: ${{ steps.meta.outputs.tags }}
