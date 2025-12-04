@@ -1,0 +1,105 @@
+# Build stage
+FROM ubuntu:24.04 AS build-stage
+
+# Docker configurations
+ARG CMAKE_VERSION=4.2.0
+ARG CMAKE_OS=linux
+ARG CMAKE_ARCH=x86_64
+ARG LIBTORCH_VERSION=2.9.1
+ARG NJOBS=1
+
+# CMake configuration
+ARG CMAKE_BUILD_TYPE=Release
+ARG CMAKE_INSTALL_PREFIX=/opt/iganet
+
+# G+Smo target architecture
+ARG TARGET_ARCHITECTURE=nehalem
+
+# IGANets options
+ARG IGANET_BUILD_CPUONLY=OFF
+ARG IGANET_BUILD_DOCS=OFF
+ARG IGANET_BUILD_PCH=ON
+ARG IGANET_OPTIONAL=""
+ARG IGANET_WITH_GISMO=OFF
+ARG IGANET_WITH_MATPLOT=OFF
+ARG IGANET_WITH_MPI=OFF
+ARG IGANET_WITH_OPENMP=ON
+
+# Install dependencies
+RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libcurl4-openssl-dev \
+        libgflags-dev \
+        libssl-dev \
+        libz-dev \
+	ninja-build \
+        unzip
+
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       apt-get -qq install -y --no-install-recommends \
+       openmpi; \
+    fi
+
+# Install CMake
+ARG CMAKE_URL=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-${CMAKE_OS}-${CMAKE_ARCH}.tar.gz
+WORKDIR /opt
+RUN curl -fsSL --insecure -o cmake.tar.gz ${CMAKE_URL} \
+        && tar xzf cmake.tar.gz \
+        && rm cmake.tar.gz
+ENV PATH="$PATH:/opt/cmake-${CMAKE_VERSION}-${CMAKE_OS}-${CMAKE_ARCH}/bin"
+
+# Install LibTorch
+ARG LIBTORCH_URL=https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip
+WORKDIR /opt
+RUN curl -fsSL --insecure -o libtorch.zip ${LIBTORCH_URL} \
+        && unzip -q libtorch.zip \
+        && rm libtorch.zip	
+ENV LD_LIBRARY_PATH=/opt/libtorch/lib:$LD_LIBRARY_PATH	
+
+# Install IGANets
+WORKDIR /opt
+RUN git clone https://github.com/iganets/iganet iganet-source
+
+WORKDIR /opt/iganet-build
+RUN rm -rf * \
+        && CC=gcc CXX=g++ \
+	cmake /opt/iganet-source -G Ninja \
+        -DTorch_DIR=/opt/libtorch/share/cmake/Torch \
+        -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
+	-DCMAKE_INSTALL_PREFIX:PATH=$CMAKE_INSTALL_PREFIX \
+        -DTARGET_ARCHITECTURE=$TARGET_ARCHITECTURE \
+	-DIGANET_BUILD_CPUONLY=$IGANET_BUILD_CPUONLY \
+	-DIGANET_BUILD_DOCS=$IGANET_BUILD_DOCS \
+	-DIGANET_BUILD_PCH=$IGANET_BUILD_PCH \
+	-DIGANET_OPTIONAL=$IGANET_OPTIONAL \
+	-DIGANET_WITH_GISMO=$IGANET_WITH_GISMO \
+	-DIGANET_WITH_MATPLOT=$IGANET_WITH_MATPLOT \
+	-DIGANET_WITH_MPI=$IGANET_WITH_MPI \
+	-DIGANET_WITH_OPENMP=$IGANET_WITH_OPENMP \
+        && ninja install -j ${NJOBS}
+
+# Production stage
+FROM ubuntu:24.04 AS production-stage
+
+# Install dependencies
+RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
+        build-essential libz-dev
+
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       apt-get -qq install -y --no-install-recommends \
+       openmpi; \
+    fi
+
+# Copy LibTorch installation
+COPY --from=build-stage /opt/libtorch /opt/libtorch
+ENV LD_LIBRARY_PATH=/opt/libtorch/lib:$LD_LIBRARY_PATH
+
+# Copy IGANet installation
+COPY --from=build-stage /opt/iganet /opt/iganet
+ENV LD_LIBRARY_PATH=/opt/iganet/lib:$LD_LIBRARY_PATH
+ENV PATH=/opt/iganet/bin:$PATH
+
+WORKDIR /opt/iganet/bin
