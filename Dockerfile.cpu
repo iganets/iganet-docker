@@ -1,0 +1,152 @@
+ARG IGANET_ROOT=/opt/iganet
+
+# Build stage
+FROM ubuntu:26.04 AS build-stage
+ARG IGANET_ROOT
+ARG TARGETOS
+ARG TARGETARCH
+
+# Docker configurations
+ARG CMAKE_VERSION=4.4.0
+ARG LIBTORCH_VERSION=2.13.0
+ARG NJOBS=1
+
+# G+Smo target architecture
+ARG TARGET_ARCHITECTURE=nehalem
+
+# IGANets options
+ARG IGANET_BUILD_TYPE=Release
+ARG IGANET_BUILD_CPUONLY=OFF
+ARG IGANET_BUILD_DOCS=OFF
+ARG IGANET_BUILD_PCH=ON
+ARG IGANET_OPTIONAL=""
+ARG IGANET_WITH_GISMO=OFF
+ARG IGANET_WITH_MATPLOT=OFF
+ARG IGANET_WITH_MPI=OFF
+ARG IGANET_WITH_OPENMP=ON
+
+# Install dependencies
+RUN echo "==> Installing dependencies..." && \
+    apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libcurl4-openssl-dev \
+        libgflags-dev \
+        libssl-dev \
+        libz-dev \
+        ninja-build \
+        unzip && \
+    echo "==> Dependencies installed successfully."
+
+# Install dependencies for MPI-support
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       echo "==> Installing dependencies for MPI support..." && \
+       apt-get -qq install -y --no-install-recommends \
+           openmpi && \
+       echo "==> Dependencies for MPI support installed successfully."; \
+    fi
+
+# Switch to workdir
+WORKDIR /opt
+
+# Install CMake
+RUN case "${TARGETARCH}" in \
+      amd64) CMAKE_ARCH="x86_64" ;; \
+      arm64) CMAKE_ARCH="aarch64" ;; \
+      *) \
+        echo "Unsupported architecture: ${TARGETARCH}" >&2; \
+        exit 1; \
+        ;; \
+    esac && \
+    CMAKE_PLATFORM="${TARGETOS}-${CMAKE_ARCH}" && \
+    CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-${CMAKE_PLATFORM}.tar.gz" && \
+    echo "==> Installing CMake ${CMAKE_VERSION} (${CMAKE_PLATFORM})..." && \
+    curl -fsSL -o /tmp/cmake.tar.gz "${CMAKE_URL}" && \
+    mkdir -p /opt/cmake && \
+    tar -xzf /tmp/cmake.tar.gz \
+        --strip-components=1 \
+        -C /opt/cmake && \
+    rm /tmp/cmake.tar.gz && \
+    echo "==> CMake ${CMAKE_VERSION} (${CMAKE_PLATFORM}) installed successfully."
+
+ENV PATH="/opt/cmake/bin:${PATH}"
+
+# Install LibTorch
+RUN case "${TARGETARCH}" in \
+      amd64) \
+        LIBTORCH_URL=https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip && \
+        echo "==> Installing LibTorch ${LIBTORCH_VERSION} for amd64..." && \
+        curl -fsSL --insecure -o /tmp/libtorch.zip ${LIBTORCH_URL} && \
+        unzip -q /tmp/libtorch.zip && \
+        rm /tmp/libtorch.zip && \
+        echo "==> LibTorch ${LIBTORCH_VERSION}  installed successfully."; \
+        ;; \
+      arm64) \
+        echo "==> Installing LibTorch ${LIBTORCH_VERSION} for arm64..."; \
+        apt-get -qq install -y --no-install-recommends python3 python3-pip && \
+        python3 -m pip install \
+          --break-system-packages \
+          --no-cache-dir \
+          "torch==${LIBTORCH_VERSION}+cpu" \
+          --index-url https://download.pytorch.org/whl/cpu && \
+        TORCH_ROOT="$(python3 -c 'import os, torch; print(os.path.dirname(torch.__file__))')" && \
+        ln -s "${TORCH_ROOT}" /opt/libtorch; \
+        ;; \
+      *) \
+        echo "Unsupported architecture: ${TARGETARCH}" >&2; \
+        exit 1; \
+        ;; \
+    esac
+
+ENV CMAKE_PREFIX_PATH="/opt/libtorch:{CMAKE_PREFIX_PATH:-}"
+ENV LD_LIBRARY_PATH="/opt/libtorch/lib:${LD_LIBRARY_PATH:-}"
+
+# Install IGANets
+RUN git clone https://github.com/iganets/iganet iganet-source
+
+WORKDIR /opt/iganet-build
+RUN rm -rf * && \
+    CC=gcc CXX=g++ \
+    cmake /opt/iganet-source -G Ninja \
+      -DTorch_DIR=/opt/libtorch/share/cmake/Torch \
+      -DCMAKE_BUILD_TYPE=$IGANET_BUILD_TYPE \
+      -DCMAKE_INSTALL_PREFIX:PATH=$IGANET_ROOT \
+      -DTARGET_ARCHITECTURE=$TARGET_ARCHITECTURE \
+      -DIGANET_BUILD_CPUONLY=$IGANET_BUILD_CPUONLY \
+      -DIGANET_BUILD_DOCS=$IGANET_BUILD_DOCS \
+      -DIGANET_BUILD_PCH=$IGANET_BUILD_PCH \
+      -DIGANET_OPTIONAL=$IGANET_OPTIONAL \
+      -DIGANET_WITH_GISMO=$IGANET_WITH_GISMO \
+      -DIGANET_WITH_MATPLOT=$IGANET_WITH_MATPLOT \
+      -DIGANET_WITH_MPI=$IGANET_WITH_MPI \
+      -DIGANET_WITH_OPENMP=$IGANET_WITH_OPENMP && \
+    ninja install -j ${NJOBS}
+
+# Production stage
+FROM ubuntu:26.04 AS production-stage
+ARG IGANET_ROOT
+
+# Install dependencies
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+        build-essential libz-dev
+
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       apt-get -qq install -y --no-install-recommends \
+       openmpi; \
+    fi
+
+# Copy LibTorch installation
+COPY --from=build-stage /opt/libtorch /opt/libtorch
+ENV LD_LIBRARY_PATH="/opt/libtorch/lib:${LD_LIBRARY_PATH:-}"
+
+# Copy IGANet installation
+COPY --from=build-stage $IGANET_ROOT $IGANET_ROOT
+ENV LD_LIBRARY_PATH="${IGANET_ROOT}/lib:${LD_LIBRARY_PATH:-}"
+ENV PATH="${IGANET_ROOT}/bin:${PATH}"
+
+# Define working directory
+WORKDIR ${IGANET_ROOT}
