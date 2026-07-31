@@ -3,7 +3,7 @@ ARG IGANET_ROOT=/opt/iganet
 ARG UBUNTU_VERSION=26.04
 
 # Developer build stage
-FROM ubuntu:${UBUNTU_VERSION} AS dev
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS dev
 ARG IGANET_ROOT
 ARG TARGETOS
 ARG TARGETARCH
@@ -142,7 +142,7 @@ RUN rm -rf * && \
     ninja install -j ${NJOBS}
 
 # Production build
-FROM ubuntu:${UBUNTU_VERSION} AS production
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS production-stage
 ARG IGANET_ROOT
 ARG IGANET_OPTIONAL
 ARG IGANET_WITH_MPI

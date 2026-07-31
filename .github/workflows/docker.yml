@@ -1,0 +1,30 @@
+name: Build and publish Docker images
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    uses: iganets/.github/.github/workflows/docker.yml@main
+    with:
+      IGANET_BUILD_TYPE: Release
+      IGANET_BUILD_CPUONLY: "OFF"
+      IGANET_BUILD_DOCS: "OFF"
+      IGANET_BUILD_PCH: "ON"
+      IGANET_OPTIONAL: ""
+      IGANET_WITH_GISMO: "OFF"
+      IGANET_WITH_MATPLOT: "OFF"
+      IGANET_WITH_MPI: "OFF"
+      IGANET_WITH_OPENMP: "ON"
+      IMAGE_NAME: iganets
+      CPU_TAG: cpu
+      CPU_DEV_TAG: cpu-dev
+      CUDA_TAG: cuda
+      CUDA_DEV_TAG: cuda-dev
