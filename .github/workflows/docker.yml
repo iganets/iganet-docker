@@ -23,7 +23,7 @@ jobs:
       IGANET_WITH_MATPLOT: "OFF"
       IGANET_WITH_MPI: "OFF"
       IGANET_WITH_OPENMP: "ON"
-      IMAGE_NAME: iganets
+      IMAGE_NAME: iganet
       CPU_TAG: cpu
       CPU_DEV_TAG: cpu-dev
       CUDA_TAG: cuda
