@@ -8,7 +8,7 @@ ARG TARGETARCH
 
 # Docker configurations
 ARG CMAKE_VERSION=3.31.0
-ARG NJOBS=1
+ARG NJOBS
 
 # IGANets options
 ARG IGANET_BUILD_TYPE=Release
@@ -105,7 +105,11 @@ RUN rm -rf * && \
       -DIGANET_WITH_MATPLOT=$IGANET_WITH_MATPLOT \
       -DIGANET_WITH_MPI=$IGANET_WITH_MPI \
       -DIGANET_WITH_OPENMP=$IGANET_WITH_OPENMP && \
-    ninja install -j ${NJOBS}
+    if [ -n "${NJOBS}" ]; then \
+      ninja install -j "${NJOBS}"; \
+    else \
+      ninja install; \
+    fi
 
 # Production build
 FROM nvcr.io/nvidia/pytorch:26.05-py3 AS production-stage
