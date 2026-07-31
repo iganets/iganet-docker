@@ -1,18 +1,13 @@
 ARG IGANET_ROOT=/opt/iganet
 
-ARG CUDA_VERSION=13.2.1
-ARG UBUNTU_VERSION=24.04
-
 # Developer build stage
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS dev
+FROM nvcr.io/nvidia/pytorch:26.05-py3 AS dev
 ARG IGANET_ROOT
 ARG TARGETOS
 ARG TARGETARCH
 
 # Docker configurations
 ARG CMAKE_VERSION=4.4.0
-ARG LIBTORCH_VERSION=2.13.0
-ARG LIBTORCH_CUDA_VERSION=cu132
 ARG NJOBS=1
 
 # G+Smo target architecture
@@ -92,45 +87,17 @@ RUN case "${TARGETARCH}" in \
 
 ENV PATH="/opt/cmake/bin:${PATH}"
 
-# Install LibTorch
-RUN case "${TARGETARCH}" in \
-      amd64) \
-        LIBTORCH_URL=https://download.pytorch.org/libtorch/${LIBTORCH_CUDA_VERSION}/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2B${LIBTORCH_CUDA_VERSION}.zip && \
-        echo "==> Installing LibTorch ${LIBTORCH_VERSION} ${LIBTORCH_CUDA_VERSION} for amd64..." && \
-        curl -fsSL --insecure -o /tmp/libtorch.zip ${LIBTORCH_URL} && \
-        unzip -q /tmp/libtorch.zip && \
-        rm /tmp/libtorch.zip && \
-        echo "==> LibTorch ${LIBTORCH_VERSION} ${LIBTORCH_CUDA_VERSION} installed successfully."; \
-        ;; \
-      arm64) \
-        echo "==> Installing LibTorch ${LIBTORCH_VERSION} ${LIBTORCH_CUDA_VERSION} for arm64..."; \
-        apt-get install -y -qq --no-install-recommends python3 python3-pip && \
-        python3 -m pip install \
-          --break-system-packages \
-          --no-cache-dir \
-          "torch==${LIBTORCH_VERSION}+${LIBTORCH_CUDA_VERSION}" \
-          --index-url https://download.pytorch.org/whl/${LIBTORCH_CUDA_VERSION} && \
-        TORCH_ROOT="$(python3 -c 'import os, torch; print(os.path.dirname(torch.__file__))')" && \
-        ln -s "${TORCH_ROOT}" /opt/libtorch; \
-        echo "==> LibTorch ${LIBTORCH_VERSION} ${LIBTORCH_CUDA_VERSION} installed successfully."; \
-        ;; \
-      *) \
-        echo "Unsupported architecture: ${TARGETARCH}" >&2; \
-        exit 1; \
-        ;; \
-    esac
-
-ENV CMAKE_PREFIX_PATH="/opt/libtorch:{CMAKE_PREFIX_PATH:-}"
-ENV LD_LIBRARY_PATH="/opt/libtorch/lib:${LD_LIBRARY_PATH:-}"
-
 # Install IGANets
 RUN git clone https://github.com/iganets/iganet iganet-source
 
 WORKDIR /opt/iganet-build
 RUN rm -rf * && \
+    TORCH_DIR="$(python3 -c \
+      'from pathlib import Path; import torch; print(Path(torch.__file__).parent / "share" / "cmake" / "Torch")')" && \
+    test -f "${TORCH_DIR}/TorchConfig.cmake" && \
     CC=gcc CXX=g++ \
     cmake /opt/iganet-source -G Ninja \
-      -DTorch_DIR=/opt/libtorch/share/cmake/Torch \
+      -DTorch_DIR="${TORCH_DIR}" \
       -DCMAKE_BUILD_TYPE=$IGANET_BUILD_TYPE \
       -DCMAKE_INSTALL_PREFIX:PATH=$IGANET_ROOT \
       -DTARGET_ARCHITECTURE=$TARGET_ARCHITECTURE \
@@ -145,7 +112,7 @@ RUN rm -rf * && \
     ninja install -j ${NJOBS}
 
 # Production build
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS production-stage
+FROM nvcr.io/nvidia/pytorch:26.05-py3 AS production-stage
 ARG IGANET_ROOT
 ARG IGANET_OPTIONAL
 ARG IGANET_WITH_MPI
@@ -174,10 +141,6 @@ RUN case ";${IGANET_OPTIONAL};" in \
         echo "==> Python module not requested; skipping its dependencies." \
         ;; \
     esac
-
-# Copy LibTorch installation
-COPY --from=dev /opt/libtorch /opt/libtorch
-ENV LD_LIBRARY_PATH="/opt/libtorch/lib:${LD_LIBRARY_PATH:-}"
 
 # Copy IGANet installation
 COPY --from=dev $IGANET_ROOT $IGANET_ROOT
