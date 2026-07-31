@@ -98,7 +98,7 @@ RUN case "${TARGETARCH}" in \
         curl -fsSL --insecure -o /tmp/libtorch.zip ${LIBTORCH_URL} && \
         unzip -q /tmp/libtorch.zip && \
         rm /tmp/libtorch.zip && \
-        echo "==> LibTorch ${LIBTORCH_VERSION}  installed successfully."; \
+        echo "==> LibTorch ${LIBTORCH_VERSION} installed successfully."; \
         ;; \
       arm64) \
         echo "==> Installing LibTorch ${LIBTORCH_VERSION} for arm64..."; \
@@ -110,6 +110,7 @@ RUN case "${TARGETARCH}" in \
           --index-url https://download.pytorch.org/whl/cpu && \
         TORCH_ROOT="$(python3 -c 'import os, torch; print(os.path.dirname(torch.__file__))')" && \
         ln -s "${TORCH_ROOT}" /opt/libtorch; \
+        echo "==> LibTorch ${LIBTORCH_VERSION} installed successfully."; \
         ;; \
       *) \
         echo "Unsupported architecture: ${TARGETARCH}" >&2; \
