@@ -5,6 +5,17 @@ This repository provides Docker build scripts for creating customizable IGANets 
 - **Production:** Provides a clean installation of IGANets and the configured modules.
 - **Development:** Stops at the end of the build stage, preserving the complete source and build directories for further development and debugging.
 
+## Prebuilt Docker images
+
+Pre-built Docker images are available through GitHub Container Registry (GHCR)
+
+| Image name                       | Description|
+| --------------------------------- | ---------------------------- |
+| `ghcr.io/iganets/iganet:cpu`      | CPU-only build               |
+| `ghcr.io/iganets/iganet:cpu-dev`  | CPU-only developer build     |
+| `ghcr.io/iganets/iganet:cuda`     | CUDA-enabled build           |
+| `ghcr.io/iganets/iganet:cuda-dev` | CUDA-enabled developer build |
+
 ## Building the Docker image
 
 Build the CPU-only Docker image from the repository root:
