@@ -112,7 +112,7 @@ RUN rm -rf * && \
     fi
 
 # Production build
-FROM nvcr.io/nvidia/pytorch:26.05-py3 AS production-stage
+FROM nvcr.io/nvidia/pytorch:26.05-py3 AS production
 ARG IGANET_ROOT
 ARG IGANET_OPTIONAL
 ARG IGANET_WITH_MPI
