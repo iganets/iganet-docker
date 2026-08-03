@@ -4,7 +4,15 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "*"
   workflow_dispatch:
+    inputs:
+      IMAGE_TAG:
+        description: Docker image tag (a triggering Git tag takes precedence)
+        required: false
+        type: string
+        default: latest
 
 permissions:
   contents: read
@@ -24,7 +32,8 @@ jobs:
       IGANET_WITH_MPI: "OFF"
       IGANET_WITH_OPENMP: "ON"
       IMAGE_NAME: iganet
-      CPU_TAG: cpu
-      CPU_DEV_TAG: cpu-dev
-      CUDA_TAG: cuda
-      CUDA_DEV_TAG: cuda-dev
+      IMAGE_TAG: ${{ inputs.IMAGE_TAG || 'latest' }}
+      CPU_LABEL: cpu
+      CPU_DEV_LABEL: cpu-dev
+      CUDA_LABEL: cuda
+      CUDA_DEV_LABEL: cuda-dev
