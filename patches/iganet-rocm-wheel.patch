@@ -1,0 +1,117 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b3051e8..4466244 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -110,6 +110,111 @@ if(NOT DEFINED IGANET_OPTIONAL)
+   set(IGANET_OPTIONAL "" CACHE STRING "Build optional modules")
+ endif()
+ 
++########################################################################
++# PyTorch and wheel-based ROCm SDK
++########################################################################
++
++find_package(Python3 REQUIRED COMPONENTS Interpreter)
++
++# ROCm 7.14 Docker images install ROCm as Python wheels rather than
++# under /opt/rocm. Discover every directory containing a ROCm shared
++# library, including nested host-math and rocm_sysdeps directories.
++execute_process(
++  COMMAND
++    "${Python3_EXECUTABLE}" -c
++    "import pathlib, site; roots=[p for s in site.getsitepackages() for p in pathlib.Path(s).glob('_rocm_sdk*')]; print(';'.join(sorted({str(p.parent) for r in roots for p in r.rglob('lib*.so*')})))"
++  OUTPUT_VARIABLE ROCM_WHEEL_LIBRARY_DIRS
++  OUTPUT_STRIP_TRAILING_WHITESPACE
++  COMMAND_ERROR_IS_FATAL ANY
++)
++
++if(NOT ROCM_WHEEL_LIBRARY_DIRS)
++  message(FATAL_ERROR
++    "No ROCm wheel library directories were found")
++endif()
++
++foreach(ROCM_LIBRARY_DIR IN LISTS ROCM_WHEEL_LIBRARY_DIRS)
++  message(STATUS
++    "ROCm wheel library directory: ${ROCM_LIBRARY_DIR}")
++endforeach()
++
++# Some PyTorch dependencies are exported as bare -l<name> entries.
++target_link_directories(iganet_core INTERFACE
++  ${ROCM_WHEEL_LIBRARY_DIRS}
++)
++
++# Let the linker resolve indirect DT_NEEDED dependencies such as
++# librocm-openblas.so and librocm_sysdeps_liblzma.so.
++foreach(ROCM_LIBRARY_DIR IN LISTS ROCM_WHEEL_LIBRARY_DIRS)
++  target_link_options(iganet_core INTERFACE
++    "LINKER:-rpath-link,${ROCM_LIBRARY_DIR}"
++  )
++endforeach()
++
++# Create a CMake imported target for a shared library supplied by the
++# ROCm Python wheels. This also handles wheels that contain only a
++# versioned library, for example libMIOpen.so.1 without libMIOpen.so.
++function(iganet_add_rocm_imported_target TARGET_NAME LIBRARY_NAME)
++  if(TARGET "${TARGET_NAME}")
++    return()
++  endif()
++
++  set(ROCM_LIBRARY_CANDIDATES)
++
++  foreach(ROCM_LIBRARY_DIR IN LISTS ROCM_WHEEL_LIBRARY_DIRS)
++    file(GLOB CURRENT_ROCM_LIBRARY_CANDIDATES
++      "${ROCM_LIBRARY_DIR}/lib${LIBRARY_NAME}.so"
++      "${ROCM_LIBRARY_DIR}/lib${LIBRARY_NAME}.so.*"
++    )
++
++    list(APPEND ROCM_LIBRARY_CANDIDATES
++      ${CURRENT_ROCM_LIBRARY_CANDIDATES}
++    )
++  endforeach()
++
++  if(NOT ROCM_LIBRARY_CANDIDATES)
++    message(FATAL_ERROR
++      "Could not find lib${LIBRARY_NAME}.so in the ROCm wheel directories")
++  endif()
++
++  list(REMOVE_DUPLICATES ROCM_LIBRARY_CANDIDATES)
++  list(SORT ROCM_LIBRARY_CANDIDATES
++    COMPARE NATURAL
++    ORDER ASCENDING
++  )
++  list(GET ROCM_LIBRARY_CANDIDATES 0 ROCM_IMPORTED_LIBRARY)
++
++  message(STATUS
++    "Creating ${TARGET_NAME} using ${ROCM_IMPORTED_LIBRARY}")
++
++  add_library("${TARGET_NAME}" INTERFACE IMPORTED GLOBAL)
++
++  set_target_properties("${TARGET_NAME}" PROPERTIES
++    INTERFACE_LINK_LIBRARIES "${ROCM_IMPORTED_LIBRARY}"
++  )
++endfunction()
++
++# Targets referenced by PyTorch's generated Caffe2Targets.cmake.
++iganet_add_rocm_imported_target(hip::amdhip64 amdhip64)
++iganet_add_rocm_imported_target(hip::hipfft hipfft)
++iganet_add_rocm_imported_target(hip::hiprand hiprand)
++iganet_add_rocm_imported_target(hipblaslt::hipblaslt hipblaslt)
++iganet_add_rocm_imported_target(hiprand hiprand)
++iganet_add_rocm_imported_target(hiprtc::hiprtc hiprtc)
++iganet_add_rocm_imported_target(roc::hipblas hipblas)
++iganet_add_rocm_imported_target(roc::hipblaslt hipblaslt)
++iganet_add_rocm_imported_target(roc::hipsolver hipsolver)
++iganet_add_rocm_imported_target(roc::hipsparse hipsparse)
++iganet_add_rocm_imported_target(roc::hipsparselt hipsparselt)
++iganet_add_rocm_imported_target(roc::rocblas rocblas)
++iganet_add_rocm_imported_target(roc::rocsolver rocsolver)
++
++# These are exported by PyTorch as plain library names. Defining targets
++# with the same names prevents generation of unusable -lMIOpen and
++# -lrocm_smi64 arguments when only versioned wheel libraries exist.
++iganet_add_rocm_imported_target(MIOpen MIOpen)
++iganet_add_rocm_imported_target(rocm_smi64 rocm_smi64)
++
+ ########################################################################
+ # Prerequisites
+ ########################################################################
+ 
