@@ -37,3 +37,4 @@ jobs:
       CPU_DEV_LABEL: cpu-dev
       CUDA_LABEL: cuda
       CUDA_DEV_LABEL: cuda-dev
+      NJOBS: 1
