@@ -1,0 +1,178 @@
+ARG IGANET_ROOT=/opt/iganet
+
+# Developer build stage
+FROM rocm/pytorch:rocm7.14_ubuntu24.04_py3.13_pytorch_release_2.12.0 AS dev
+ARG IGANET_ROOT
+ARG TARGETOS
+ARG TARGETARCH
+
+# Docker configurations
+ARG CMAKE_VERSION=3.31.0
+ARG NJOBS=1
+
+# IGANets options
+ARG IGANET_BUILD_TYPE=Release
+ARG IGANET_BUILD_CPUONLY=OFF
+ARG IGANET_BUILD_DOCS=OFF
+ARG IGANET_BUILD_PCH=ON
+ARG IGANET_OPTIONAL=""
+ARG IGANET_WITH_GISMO=OFF
+ARG IGANET_WITH_MATPLOT=OFF
+ARG IGANET_WITH_MPI=OFF
+ARG IGANET_WITH_OPENMP=ON
+
+# Install dependencies
+RUN echo "==> Installing dependencies..." && \
+    apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libcurl4-openssl-dev \
+        libgflags-dev \
+        libssl-dev \
+        libz-dev \
+        ninja-build \
+        unzip && \
+    echo "==> Dependencies installed successfully."
+
+# Install dependencies for MPI-support
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       echo "==> Installing dependencies for MPI support..." && \
+       apt-get install -y -qq --no-install-recommends \
+           openmpi && \
+       echo "==> Dependencies for MPI support installed successfully."; \
+    fi
+
+# Install dependencies for the Python module
+RUN case ";${IGANET_OPTIONAL};" in \
+      *";python;"*|*";python["*"];"*) \
+        echo "==> Installing dependencies for the Python module..." && \
+        apt-get install -y -qq --no-install-recommends \
+          python3 \
+          python3-dev && \
+        echo "==> Python module dependencies installed successfully." \
+        ;; \
+      *) \
+        echo "==> Python module not requested; skipping its dependencies." \
+        ;; \
+    esac
+
+# Switch to workdir
+WORKDIR /opt
+
+# Install CMake
+RUN case "${TARGETARCH}" in \
+      amd64) CMAKE_ARCH="x86_64" ;; \
+      arm64) CMAKE_ARCH="aarch64" ;; \
+      *) \
+        echo "Unsupported architecture: ${TARGETARCH}" >&2; \
+        exit 1; \
+        ;; \
+    esac && \
+    CMAKE_PLATFORM="${TARGETOS}-${CMAKE_ARCH}" && \
+    CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-${CMAKE_PLATFORM}.tar.gz" && \
+    echo "==> Installing CMake ${CMAKE_VERSION} (${CMAKE_PLATFORM})..." && \
+    curl -fsSL -o /tmp/cmake.tar.gz "${CMAKE_URL}" && \
+    mkdir -p /opt/cmake && \
+    tar -xzf /tmp/cmake.tar.gz \
+        --strip-components=1 \
+        -C /opt/cmake && \
+    rm /tmp/cmake.tar.gz && \
+    echo "==> CMake ${CMAKE_VERSION} (${CMAKE_PLATFORM}) installed successfully."
+
+ENV PATH="/opt/cmake/bin:${PATH}"
+
+# Install IGANets
+RUN git clone https://github.com/iganets/iganet iganet-source
+
+# Patch the CMakeLists.txt file
+COPY patches/iganet-rocm-wheel.patch /tmp/iganet-rocm-wheel.patch
+
+RUN git -C /opt/iganet-source \
+      apply --check /tmp/iganet-rocm-wheel.patch && \
+    git -C /opt/iganet-source \
+      apply /tmp/iganet-rocm-wheel.patch
+
+WORKDIR /opt/iganet-build
+RUN rm -rf * && \
+    TORCH_DIR="$(python3 -c \
+      'from pathlib import Path; import torch; print(Path(torch.__file__).parent / "share" / "cmake" / "Torch")')" && \
+    test -f "${TORCH_DIR}/TorchConfig.cmake" && \
+    CC=gcc CXX=g++ \
+    cmake /opt/iganet-source -G Ninja \
+      -DTorch_DIR="${TORCH_DIR}" \
+      -DCMAKE_BUILD_TYPE=$IGANET_BUILD_TYPE \
+      -DCMAKE_INSTALL_PREFIX:PATH=$IGANET_ROOT \
+      -DIGANET_BUILD_CPUONLY=$IGANET_BUILD_CPUONLY \
+      -DIGANET_BUILD_DOCS=$IGANET_BUILD_DOCS \
+      -DIGANET_BUILD_PCH=$IGANET_BUILD_PCH \
+      -DIGANET_OPTIONAL=$IGANET_OPTIONAL \
+      -DIGANET_WITH_GISMO=$IGANET_WITH_GISMO \
+      -DIGANET_WITH_MATPLOT=$IGANET_WITH_MATPLOT \
+      -DIGANET_WITH_MPI=$IGANET_WITH_MPI \
+      -DIGANET_WITH_OPENMP=$IGANET_WITH_OPENMP && \
+   if [ -n "${NJOBS}" ]; then \
+     ninja install -j "${NJOBS}"; \
+   else \
+     ninja install; \
+   fi
+
+# Production build
+FROM rocm/pytorch:rocm7.14_ubuntu24.04_py3.13_pytorch_release_2.12.0 AS production
+ARG IGANET_ROOT
+ARG IGANET_OPTIONAL
+ARG IGANET_WITH_MPI
+
+# Install dependencies
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+        build-essential libz-dev
+
+RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
+       apt-get install -y -qq --no-install-recommends \
+       openmpi; \
+    fi
+
+# Install dependencies for the Python module
+RUN case ";${IGANET_OPTIONAL};" in \
+      *";python;"*|*";python["*"];"*) \
+        echo "==> Installing dependencies for the Python module..." && \
+        apt-get install -y -qq --no-install-recommends \
+          python3 \
+          python3-dev && \
+        rm -rf /var/lib/apt/lists/* && \
+        echo "==> Python module dependencies installed successfully." \
+        ;; \
+      *) \
+        echo "==> Python module not requested; skipping its dependencies." \
+        ;; \
+    esac
+
+# Copy IGANet installation
+COPY --from=dev $IGANET_ROOT $IGANET_ROOT
+ENV LD_LIBRARY_PATH="${IGANET_ROOT}/lib:${LD_LIBRARY_PATH:-}"
+ENV PATH="${IGANET_ROOT}/bin:${PATH}"
+
+# Register the ROCM shared libraries with the dynamic linker
+RUN ROCM_SDK_ROOT="$(python3 -c \
+      'import site; print(site.getsitepackages()[0])')" && \
+    printf '%s\n' \
+      "${ROCM_SDK_ROOT}/_rocm_sdk_core/lib" \
+      "${ROCM_SDK_ROOT}/_rocm_sdk_core/lib/rocm_sysdeps/lib" \
+      "${ROCM_SDK_ROOT}/_rocm_sdk_core/lib/host-math/lib" \
+      "${ROCM_SDK_ROOT}/_rocm_sdk_libraries/lib" \
+      > /etc/ld.so.conf.d/rocm-wheel.conf && \
+    ldconfig
+
+# Register the PyTorch/LibTorch shared libraries with the dynamic linker
+RUN TORCH_LIB_DIR="$(python3 -c \
+      'from pathlib import Path; import torch; print(Path(torch.__file__).resolve().parent / "lib")')" && \
+    test -d "${TORCH_LIB_DIR}" && \
+    printf '%s\n' "${TORCH_LIB_DIR}" \
+      > /etc/ld.so.conf.d/libtorch.conf && \
+    ldconfig
+
+# Define working directory
+WORKDIR ${IGANET_ROOT}
