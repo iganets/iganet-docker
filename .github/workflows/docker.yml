@@ -37,4 +37,6 @@ jobs:
       CPU_DEV_LABEL: cpu-dev
       CUDA_LABEL: cuda
       CUDA_DEV_LABEL: cuda-dev
+      ROCM_LABEL: rocm
+      ROCM_DEV_LABEL: rocm-dev      
       NJOBS: 1
