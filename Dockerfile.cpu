@@ -40,12 +40,20 @@ RUN echo "==> Installing dependencies..." && \
         unzip && \
     echo "==> Dependencies installed successfully."
 
+# Install dependencies for Matplot-support
+RUN if [ "$IGANET_WITH_MATPLOT" = "ON" ]; then \
+       echo "==> Installing dependencies for Matplot-support..." && \
+       apt-get install -y -qq --no-install-recommends \
+           gnuplot && \
+       echo "==> Dependencies for Matplot-support installed successfully."; \
+    fi
+
 # Install dependencies for MPI-support
 RUN if [ "$IGANET_WITH_MPI" = "ON" ]; then \
-       echo "==> Installing dependencies for MPI support..." && \
+       echo "==> Installing dependencies for MPI-support..." && \
        apt-get install -y -qq --no-install-recommends \
            openmpi && \
-       echo "==> Dependencies for MPI support installed successfully."; \
+       echo "==> Dependencies for MPI-support installed successfully."; \
     fi
 
 # Install dependencies for the Python module
